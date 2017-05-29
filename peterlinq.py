@@ -8,6 +8,8 @@ from scipy import linalg as sla
 from scipy import spatial
 from jqdata import gta
 
+#初始化方法，在整个回测、模拟实盘中最开始执行一次
+#用于初始一些全局变量
 def initialize(context):
     #用沪深 300 做回报基准
     set_benchmark('000300.XSHG')
@@ -16,7 +18,9 @@ def initialize(context):
 
     # 关闭部分log
     log.set_level('order', 'error')
+
     # 定义策略占用仓位比例
+    # toto:假设有其他策略，是不是可以共用仓位？？？？？
     context.lowPEG_ratio = 1.0
 
     # for lowPEG algorithms
@@ -25,17 +29,26 @@ def initialize(context):
     context.lowPEG_confidencelevel = 1.96
     context.lowPEG_hold_periods, context.lowPEG_hold_cycle = 0, 30
 
-    # 股票池
+    # 股票池,初始化函数时是空
     context.lowPEG_stock_list = []
     context.lowPEG_position_price = {}
 
     g.quantlib = quantlib()
 
+    #策略本身每天运行一次
+    #但网站的框架对每天执行一次的策略实在早上9:00左右执行
+    #这时候没有交易，集合竞价阶段进行调仓，也不一定确保成交
+    #所以策略指定 要在每个交易日10:30执行一次，确保交易成功
+    #但为了确保执行策略，要求策略模拟或者回测的时候要设置  *每分钟运行*
     run_daily(fun_main, '10:30')
 
-def fun_main(context):
 
+def fun_main(context):
+    '''每分钟执行一次的主函数'''
+
+    #计算  lowPRG
     lowPEG_trade_ratio = lowPEG_algo(context, context.lowPEG_ratio, context.portfolio.portfolio_value)
+
     # 调仓，执行交易
     g.quantlib.fun_do_trade(context, lowPEG_trade_ratio, context.lowPEG_moneyfund)
 
@@ -49,7 +62,7 @@ def lowPEG_algo(context, lowPEG_ratio, portfolio_value):
     调用类  : quantlib
     '''
 
-    # 引用 lib
+    # 引用 lib，lowPEG类
     g.lowPEG = lowPEG_lib()
     # 引用 quantlib
     g.quantlib = quantlib()
@@ -429,12 +442,16 @@ class lowPEG_lib():
         return trade_ratio
 
 class quantlib():
+    '''大概是一个工具类'''
 
     def __init__(self, _period = '1d'):
         pass
 
-    # 剔除周期性行业
+
     def fun_remove_cycle_industry(self, stock_list):
+        '''剔除周期性行业'''
+
+        #周期性行业定义
         cycle_industry = [#'A01', #	农业 	1993-09-17
                           #'A02', # 林业 	1996-12-06
                           #'A03', #	畜牧业 	1997-06-11
@@ -513,6 +530,7 @@ class quantlib():
                           ]
 
         for industry in cycle_industry:
+            #获取在给定日期一个行业的所有股票，  industry 是 行业代码
             stocks = get_industry_stocks(industry)
             stock_list = list(set(stock_list).difference(set(stocks)))
 
@@ -844,8 +862,13 @@ class quantlib():
                     Value -= curPrice*100
                 self.fun_trade(context, stock, Value)
 
-    # 剔除上市时间较短的产品
+
     def fun_delNewShare(self, context, equity, deltaday):
+        '''
+        剔除上市时间较短的产品
+        从 equity 中删除上市时间少于 deltaday天的产品
+        返回符合要求的产品list
+        '''
         deltaDate = context.current_dt.date() - dt.timedelta(deltaday)
 
         tmpList = []
