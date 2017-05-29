@@ -67,6 +67,7 @@ def lowPEG_algo(context, lowPEG_ratio, portfolio_value):
     # 引用 quantlib
     g.quantlib = quantlib()
 
+    #初始化，定义了股票池
     g.lowPEG.fun_initialize(context)
 
     recal_flag = False
@@ -107,6 +108,11 @@ class lowPEG_lib():
         pass
 
     def fun_initialize(self, context):
+        '''logPEG的初始化类
+        定义了股票池，还定义了基金池（不知道为什么）
+        删除了上市不超过60天的股票和基金
+        '''
+
         # 定义股票池
         lowPEG_equity = context.lowPEG_stock_list
 
@@ -114,7 +120,10 @@ class lowPEG_lib():
 
         # 上市不足 60 天的剔除掉
         context.lowPEG_equity    = g.quantlib.fun_delNewShare(context, lowPEG_equity, 60)
+
+        # 基金，不知道为什么要有基金的事情
         context.lowPEG_moneyfund = g.quantlib.fun_delNewShare(context, lowPEG_moneyfund, 60)
+
 
         context.lowPEG_hold_num = 5
         context.lowPEG_risk_ratio = 0.03 / context.lowPEG_hold_num
