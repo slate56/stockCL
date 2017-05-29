@@ -27,7 +27,11 @@ def initialize(context):
     # 正态分布概率表，标准差倍数以及置信率
     # 1.96, 95%; 2.06, 96%; 2.18, 97%; 2.34, 98%; 2.58, 99%; 5, 99.9999%
     context.lowPEG_confidencelevel = 1.96
-    context.lowPEG_hold_periods, context.lowPEG_hold_cycle = 0, 30
+
+    context.lowPEG_hold_periods = 0
+
+    #锁定周期，一旦买入股票，就锁定30天
+    context.lowPEG_hold_cycle = 30
 
     # 股票池,初始化函数时是空
     context.lowPEG_stock_list = []
@@ -70,6 +74,8 @@ def lowPEG_algo(context, lowPEG_ratio, portfolio_value):
     #初始化，定义了股票池
     g.lowPEG.fun_initialize(context)
 
+    #判断是否需要调仓
+    #当锁定周期（缺省是30）结束，或者股票池是空，就进行调仓
     recal_flag = False
     if g.lowPEG.fun_needRebalance(context):
         recal_flag = True
@@ -129,6 +135,12 @@ class lowPEG_lib():
         context.lowPEG_risk_ratio = 0.03 / context.lowPEG_hold_num
 
     def fun_needRebalance(self, context):
+        '''判定是否需要调仓
+           
+           当：股票池为空  或者 锁定周期结束时，重新调仓
+        '''
+
+
         if len(context.lowPEG_stock_list) == 0:
             context.lowPEG_hold_periods = context.lowPEG_hold_cycle
             return True
@@ -140,8 +152,9 @@ class lowPEG_lib():
             context.lowPEG_hold_periods -= 1
             return False
 
-    # 取得净利润增长率参数
     def fun_get_inc(self, context, stock_list):
+        '''取得净利润增长率参数'''
+
         # 取最近的四个季度财报的日期
         def __get_quarter(stock_list):
             '''
@@ -335,6 +348,8 @@ class lowPEG_lib():
         return PEG
 
     def fun_get_stock_list(self, context):
+        '''获取股票池
+        '''
 
         def fun_get_stock_market_cap(stock_list):
             q = query(valuation.code, valuation.market_cap
@@ -350,12 +365,18 @@ class lowPEG_lib():
             return stock_dict
 
         today = context.current_dt
+
+        #获取当天还上市的所有股票
         stock_list = list(get_all_securities(['stock'], today).index)
 
+        #提出已经停盘的股票
         stock_list = g.quantlib.unpaused(stock_list)
+        #删除周期性行业，这类股票不太适合PEG选股
         stock_list = g.quantlib.fun_remove_cycle_industry(stock_list)
 
+        #取得净利润增长率参数
         stock_dict = self.fun_get_inc(context, stock_list)
+
         old_stocks_list = []
         for stock in context.portfolio.positions.keys():
             if stock in stock_list:
@@ -888,6 +909,7 @@ class quantlib():
         return tmpList
 
     def unpaused(self, _stocklist):
+        '''删除当天已经停盘的股票'''
         current_data = get_current_data()
         return [s for s in _stocklist if not current_data[s].paused]
 
