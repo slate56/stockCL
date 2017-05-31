@@ -76,14 +76,16 @@ def lowPEG_algo(context, lowPEG_ratio, portfolio_value):
 
     #判断是否需要调仓
     #当锁定周期（缺省是30）结束，或者股票池是空，就进行调仓
-    recal_flag = False
+    recal_flag = False  #是否需要调仓的标志
     if g.lowPEG.fun_needRebalance(context):
         recal_flag = True
 
     # 配仓，分配持股比例
     equity_ratio = {}
     if recal_flag:
+        #重新计算股票池
         context.lowPEG_stock_list = g.lowPEG.fun_get_stock_list(context)
+
         equity_ratio, bonds_ratio = g.lowPEG.fun_assetAllocationSystem(context, context.lowPEG_stock_list)
     else:
         equity_ratio = context.lowPEG_equity_ratio
@@ -130,8 +132,9 @@ class lowPEG_lib():
         # 基金，不知道为什么要有基金的事情
         context.lowPEG_moneyfund = g.quantlib.fun_delNewShare(context, lowPEG_moneyfund, 60)
 
-
+        #最大的持股数量
         context.lowPEG_hold_num = 5
+
         context.lowPEG_risk_ratio = 0.03 / context.lowPEG_hold_num
 
     def fun_needRebalance(self, context):
@@ -299,6 +302,10 @@ class lowPEG_lib():
         return stock_dict
 
     def fun_cal_stock_PEG(self, context, stock_list, stock_dict):
+        '''计算股票的PEG
+        返回一个股票code  和  PEG的字典
+        '''
+
         if not stock_list:
             PEG = {}
             return PEG
@@ -306,6 +313,7 @@ class lowPEG_lib():
         q = query(valuation.code, valuation.pe_ratio
                 ).filter(valuation.code.in_(stock_list))
 
+        #查询股票的财务数据，返回dataframe，结果中的确实的数据使用0 填充
         df = get_fundamentals(q).fillna(value=0)
 
         tmpDict = df.to_dict()
@@ -352,6 +360,8 @@ class lowPEG_lib():
         '''
 
         def fun_get_stock_market_cap(stock_list):
+            '''去的股票的总市值 market_cap
+            返回code：market_cap的字典'''
             q = query(valuation.code, valuation.market_cap
                     ).filter(valuation.code.in_(stock_list))
 
@@ -377,21 +387,29 @@ class lowPEG_lib():
         #取得净利润增长率参数
         stock_dict = self.fun_get_inc(context, stock_list)
 
+        #记录已经买入过得股票  ？？？？？？？
         old_stocks_list = []
         for stock in context.portfolio.positions.keys():
             if stock in stock_list:
                 old_stocks_list.append(stock)
 
+        #计算股票的PEG，结果是code 和 peg的字典格式
         stock_PEG = self.fun_cal_stock_PEG(context, stock_list, stock_dict)
 
         stock_list = []
         buydict = {}
 
+        #选择PEG小于0.5  大于0的股票
+        #【PEG大于0.5的增长率往往是不可持续的， 这个选股策略倾向于长线投资，所以不考虑这类股票】
         for stock in stock_PEG.keys():
             if stock_PEG[stock] < 0.5 and stock_PEG[stock] > 0:
                 stock_list.append(stock)
                 buydict[stock] = stock_PEG[stock]
+
+        #取得股票的总市值
         cap_dict = fun_get_stock_market_cap(stock_list)
+
+        #按照市值进行排序
         buydict = sorted(cap_dict.items(), key=lambda d:d[1], reverse=False)
 
         buylist = []
@@ -403,6 +421,7 @@ class lowPEG_lib():
                 print stock + ", PEG = "+ str(stock_PEG[stock])
                 i += 1
 
+        #没怎么看明白，哈像是对已经买入的股票，再次计算PEG，看看需不需要调仓？？？？？？？？？？？？？？
         if len(buylist) < context.lowPEG_hold_num:
             old_stocks_PEG = self.fun_cal_stock_PEG(context, old_stocks_list, stock_dict)
             tmpDict = {}
@@ -423,6 +442,7 @@ class lowPEG_lib():
         return buylist
 
     def fun_assetAllocationSystem(self, context, buylist):
+
         def __fun_getEquity_ratio(context, __stocklist):
             __ratio = {}
             # 按风险平价配仓
@@ -807,8 +827,26 @@ class quantlib():
 
     def fun_calStockWeight_by_risk(self, context, confidencelevel, stocklist):
 
+        '''根据风险，计算股票权重
+        :param context: 上下文
+        :param confidencelevel: 信心层级
+        :param stocklist: 股票列表
+        :return: 
+        '''
         def __fun_calstock_risk_ES(stock, lag, confidencelevel):
+
+            """
+            根据计算股票的风险ES
+            :param stock: 股票代码
+            :param lag: 180， 所查看历史数据的周期，就是history中历史数据的记录数，如果后面是1d，那么就是向前追溯180d
+            :param confidencelevel: 信息层级
+            :return: 返回股票的风险ES
+            """
+
+            #取得股票的历史数据，缺省关注收盘价，参数lag缺省180d
             hStocks = history(lag, '1d', 'close', stock, df=True)
+
+            #下面的一段代码不知道什么意思？？？？？
             dailyReturns = hStocks.resample('D',how='last').pct_change().fillna(value=0, method=None, axis=0).values
             if confidencelevel   == 1.96:
                 a = (1 - 0.95)
