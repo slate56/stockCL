@@ -30,7 +30,7 @@ def initialize(context):
 
     context.lowPEG_hold_periods = 0
 
-    #锁定周期，一旦买入股票，就锁定30天
+    #锁定周期，一旦买入股票，就锁定30天，超过30天就重新计算lowPEG,如果PEG排名还是靠前，有可能就不调仓
     context.lowPEG_hold_cycle = 30
 
     # 股票池,初始化函数时是空
@@ -117,7 +117,7 @@ class lowPEG_lib():
 
     def fun_initialize(self, context):
         '''logPEG的初始化类
-        定义了股票池，还定义了基金池（不知道为什么）
+        定义了股票池，还定义了基金池（可以考虑扩展，进行基金投资）
         删除了上市不超过60天的股票和基金
         '''
 
@@ -129,17 +129,18 @@ class lowPEG_lib():
         # 上市不足 60 天的剔除掉
         context.lowPEG_equity    = g.quantlib.fun_delNewShare(context, lowPEG_equity, 60)
 
-        # 基金，不知道为什么要有基金的事情
+        # 基金也同样，上市不足60天的剔除
         context.lowPEG_moneyfund = g.quantlib.fun_delNewShare(context, lowPEG_moneyfund, 60)
 
         #最大的持股数量
         context.lowPEG_hold_num = 5
 
+        #风险指数
         context.lowPEG_risk_ratio = 0.03 / context.lowPEG_hold_num
 
     def fun_needRebalance(self, context):
         '''判定是否需要调仓
-           
+
            当：股票池为空  或者 锁定周期结束时，重新调仓
         '''
 
@@ -360,13 +361,16 @@ class lowPEG_lib():
         '''
 
         def fun_get_stock_market_cap(stock_list):
-            '''去的股票的总市值 market_cap
+            '''取得股票的总市值 market_cap
             返回code：market_cap的字典'''
             q = query(valuation.code, valuation.market_cap
                     ).filter(valuation.code.in_(stock_list))
 
             df = get_fundamentals(q).fillna(value=0)
             tmpDict = df.to_dict()
+            print "tmpDick-----------------------------------------------"
+            log.info(tmpDict)
+            print "tmpDick-----------------------------------------------"
             stock_dict = {}
             for i in range(len(tmpDict['code'].keys())):
                 # 取得每个股票的 market_cap
@@ -394,6 +398,7 @@ class lowPEG_lib():
                 old_stocks_list.append(stock)
 
         #计算股票的PEG，结果是code 和 peg的字典格式
+        #stock_PEG[stockcode]: PEG
         stock_PEG = self.fun_cal_stock_PEG(context, stock_list, stock_dict)
 
         stock_list = []
@@ -410,7 +415,12 @@ class lowPEG_lib():
         cap_dict = fun_get_stock_market_cap(stock_list)
 
         #按照市值进行排序
+        print ("未排序 购买字典")
+        log.info(buydict)
+
         buydict = sorted(cap_dict.items(), key=lambda d:d[1], reverse=False)
+        print ("已排序 购买字典")
+        log.info(buydict)
 
         buylist = []
         i = 0
@@ -418,10 +428,10 @@ class lowPEG_lib():
             if i < context.lowPEG_hold_num:
                 stock = idx[0]
                 buylist.append(stock) # 候选 stocks
-                print stock + ", PEG = "+ str(stock_PEG[stock])
+                log.info(stock + ", PEG = "+ str(stock_PEG[stock]))
                 i += 1
 
-        #没怎么看明白，哈像是对已经买入的股票，再次计算PEG，看看需不需要调仓？？？？？？？？？？？？？？
+        #没怎么看明白，好像是对已经买入的股票，再次计算PEG，看看需不需要调仓？？？？？？？？？？？？？？
         if len(buylist) < context.lowPEG_hold_num:
             old_stocks_PEG = self.fun_cal_stock_PEG(context, old_stocks_list, stock_dict)
             tmpDict = {}
@@ -436,8 +446,8 @@ class lowPEG_lib():
                     buylist.append(idx[0])
                     i += 1
 
-        print str(len(stock_list)) + " / " + str(len(buylist))
-        print buylist
+        log.info( str(len(stock_list)) + " / " + str(len(buylist)))
+        log.info(buylist)
 
         return buylist
 
@@ -829,9 +839,9 @@ class quantlib():
 
         '''根据风险，计算股票权重
         :param context: 上下文
-        :param confidencelevel: 信心层级
+        :param confidencelevel: 置信率
         :param stocklist: 股票列表
-        :return: 
+        :return:
         '''
         def __fun_calstock_risk_ES(stock, lag, confidencelevel):
 
@@ -839,7 +849,7 @@ class quantlib():
             根据计算股票的风险ES
             :param stock: 股票代码
             :param lag: 180， 所查看历史数据的周期，就是history中历史数据的记录数，如果后面是1d，那么就是向前追溯180d
-            :param confidencelevel: 信息层级
+            :param confidencelevel: 置信率
             :return: 返回股票的风险ES
             """
 
