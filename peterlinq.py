@@ -8,6 +8,11 @@ from scipy import linalg as sla
 from scipy import spatial
 from jqdata import gta
 
+#################################
+#目前各种参数比较下来，一个比较好的组合就是缺省的参数：
+#持股30天，最大持有5只股票，每日的10：30交易
+#################################
+
 #初始化方法，在整个回测、模拟实盘中最开始执行一次
 #用于初始一些全局变量
 def initialize(context):
