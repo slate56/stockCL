@@ -31,7 +31,6 @@ def initialize(context):
     context.lowPEG_hold_periods = 0
 
     #锁定周期，一旦买入股票，就锁定30天，超过30天就重新计算lowPEG,如果PEG排名还是靠前，有可能就不调仓
-    context.lowPEG_hold_cycle = 30
 
     # 股票池,初始化函数时是空
     context.lowPEG_stock_list = []
