@@ -38,7 +38,6 @@ def initialize(context):
     run_daily(after_market_close, time='after_close', reference_security='000300.XSHG')
 
     context.lowPEG_position_price = {}
-
     context.quantlib = quantlib()
 
     #run_daily(fun_main, '10:30')
