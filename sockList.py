@@ -51,13 +51,13 @@ def init_stock_list(context):
     #                   display_name	name	  start_date
     #  000001.XSHE	    平安银行	    PAYH	   1991-04-03
     #  000002.XSHE	    万 科Ａ	    WKA	        1991-01-29
-    context.stock_df = get_all_securities(['stock'], today)
-    del context.stock_df['end_date']
-    del context.stock_df['type']
+    context.__stock_df = get_all_securities(['stock'], today)
+    del context.__stock_df['end_date']
+    del context.__stock_df['type']
 
-    context.stock_df.insert(3, 'PEG', 0)
+    context.__stock_df.insert(3, 'PEG', 0)
     context.unuse_PEG_stock_list = []
-    #log.info(context.stock_df)
+    #log.info(context.__stock_df)
 
 
 ## 开盘前运行函数， 缺省系统回调函数
@@ -125,12 +125,14 @@ def cal_PEG(context, lowPEG_ratio, portfolio_value):
     # 引用 QuantLib
     g.QuantLib = QuantLib()
 
-    g.PEGLib.fun_get_unuse_PEG_stock_list(context)
+    unuse_PEG_stock_list = g.PEGLib.get_unuse_PEG_stock_list()
 
-    equity_ratio, bonds_ratio = g.PEGLib.fun_assetAllocationSystem(context, context.stock_df)
+    g.PEGLib.fun_cal_stock_PEG(context)
 
-    context.lowPEG_equity_ratio = equity_ratio
-    context.lowPEG_bonds_ratio = bonds_ratio
+    #equity_ratio, bonds_ratio = g.PEGLib.fun_assetAllocationSystem(context, context.__stock_df)
+
+    #context.lowPEG_equity_ratio = equity_ratio
+    #context.lowPEG_bonds_ratio = bonds_ratio
 
     # 分配头寸，配置市值
     #trade_ratio = {}
@@ -146,7 +148,7 @@ def cal_PEG(context, lowPEG_ratio, portfolio_value):
 
     #context.lowPEG_trade_ratio = trade_ratio
 
-    return trade_ratio
+    #return trade_ratio
 
 class PEG_lib():
 
@@ -160,7 +162,7 @@ class PEG_lib():
         '''
 
         # 定义股票池
-        lowPEG_equity = context.stock_df.to_dict().keys()
+        lowPEG_equity = context.__stock_df.keys()
 
         lowPEG_moneyfund = ['511880.XSHG']
 
@@ -188,11 +190,17 @@ class PEG_lib():
             '''
             # 取最新一季度的统计日期
             q = query(indicator.code, indicator.statDate
-                     ).filter(indicator.code.in_(stock_list.to_dict().keys()))
+                     ).filter(indicator.code.in_(stock_list))
             df = get_fundamentals(q)
+
+            if len(stock_list) <= 0:
+                log.error("stock list 长度为0")
+
 
             stock_last_statDate = {}
             tmpDict = df.to_dict()
+            print("stock_last_statDate之后的df")
+            log.info(df)
             for i in range(len(tmpDict['statDate'].keys())):
                 # 取得每个股票的代码，以及最新的财报发布日
                 stock_last_statDate[tmpDict['code'][i]] = tmpDict['statDate'][i]
@@ -322,19 +330,23 @@ class PEG_lib():
 
         return stock_dict
 
-    def fun_cal_stock_PEG(self, context, stock_list, stock_dict):
+    def fun_cal_stock_PEG(self, context):
         '''计算股票的PEG
         返回一个股票code  和  PEG的字典
         '''
 
-        if not stock_list:
-            PEG = {}
-            return PEG
+        if not context.__stock_df:
+            return
+        log.info("现在计算股票的PEG")
 
+        stock_list = context.__stock_df.keys()
+
+        print("cal_stock_PEG fun:stocklist 长度：" + len(stock_list))
+        return
         q = query(valuation.code, valuation.pe_ratio
                 ).filter(valuation.code.in_(stock_list))
 
-        #查询股票的财务数据，返回dataframe，结果中的确实的数据使用0 填充
+        #查询股票的财务数据，返回dataframe，结果中的缺失的数据使用0 填充
         df = get_fundamentals(q).fillna(value=0)
 
         tmpDict = df.to_dict()
@@ -376,81 +388,17 @@ class PEG_lib():
 
         return PEG
 
-    def fun_get_unuse_PEG_stock_list(self, context):
+    def get_unuse_PEG_stock_list(self):
         '''获取不去要计算PEG的股票代码列表
             主要是上市不足60天的股票
         '''
 
-        def fun_get_stock_market_cap(stock_list):
-            '''取得股票的总市值 market_cap
-            返回code：market_cap的字典'''
-            q = query(valuation.code, valuation.market_cap
-                    ).filter(valuation.code.in_(stock_list))
-
-            df = get_fundamentals(q).fillna(value=0)
-            tmpDict = df.to_dict()
-            stock_dict = {}
-            for i in range(len(tmpDict['code'].keys())):
-                # 取得每个股票的 market_cap
-                stock_dict[tmpDict['code'][i]] = tmpDict['market_cap'][i]
-
-            return stock_dict
 
         #剔除已经停盘的股票
         #stock_list = g.QuantLib.unpaused(stock_list)
         #获取周期性行业，这类股票不太适合PEG选股
-        context.unuse_PEG_stock_list = g.QuantLib.fun_get_cycle_industry(context)
-
-        #取得净利润增长率参数
-        stock_dict = self.fun_get_inc(context, context.stock_df)
-
-        #计算股票的PEG，结果是code 和 peg的字典格式
-        #stock_PEG[stockcode]: PEG
-        stock_PEG = self.fun_cal_stock_PEG(context, stock_list, stock_dict)
-
-        stock_list = []
-        buydict = {}
-
-        #选择PEG小于0.5  大于0的股票
-        #【PEG大于0.5的增长率往往是不可持续的， 这个选股策略倾向于长线投资，所以不考虑这类股票】
-        for stock in stock_PEG.keys():
-            if stock_PEG[stock] < 0.5 and stock_PEG[stock] > 0:
-                stock_list.append(stock)
-                buydict[stock] = stock_PEG[stock]
-
-        #取得股票的总市值
-        cap_dict = fun_get_stock_market_cap(stock_list)
-
-        buydict = sorted(cap_dict.items(), key=lambda d:d[1], reverse=False)
-
-        buylist = []
-        i = 0
-        for idx in buydict:
-            if i < context.lowPEG_hold_num:
-                stock = idx[0]
-                buylist.append(stock) # 候选 stocks
-                log.info(stock + ", PEG = "+ str(stock_PEG[stock]))
-                i += 1
-
-        #没怎么看明白，好像是对已经买入的股票，再次计算PEG，看看需不需要调仓？？？？？？？？？？？？？？
-        if len(buylist) < context.lowPEG_hold_num:
-            old_stocks_PEG = self.fun_cal_stock_PEG(context, old_stocks_list, stock_dict)
-            tmpDict = {}
-            tmpList = []
-            for stock in old_stocks_PEG.keys():
-                if old_stocks_PEG[stock] < 1.0 and old_stocks_PEG[stock] > 0:
-                    tmpDict[stock] = old_stocks_PEG[stock]
-            tmpDict = sorted(tmpDict.items(), key=lambda d:d[1], reverse=False)
-            i = len(buylist)
-            for idx in tmpDict:
-                if i < context.lowPEG_hold_num and idx[0] not in buylist:
-                    buylist.append(idx[0])
-                    i += 1
-
-        log.info( str(len(stock_list)) + " / " + str(len(buylist)))
-        log.info(buylist)
-
-        return buylist
+        unuse_PEG_stock_list = g.QuantLib.fun_get_cycle_industry()
+        return unuse_PEG_stock_list
 
     def fun_assetAllocationSystem(self, context, buylist):
 
@@ -509,9 +457,10 @@ class QuantLib():
         pass
 
 
-    def fun_get_cycle_industry(self, context):
+    def fun_get_cycle_industry(self):
         '''获得周期性行业'''
 
+        cycle_stock_list = []
         #周期性行业定义
         cycle_industry = [#'A01', #	农业 	1993-09-17
                           #'A02', # 林业 	1996-12-06
@@ -593,11 +542,11 @@ class QuantLib():
         for industry in cycle_industry:
             #获取在给定日期一个行业的所有股票，  industry 是 行业代码
             unuse_stocks = get_industry_stocks(industry)
-            context.unuse_PEG_stock_list.append(unuse_stocks)
+            cycle_stock_list.append(unuse_stocks)
 
         print ("PEG 不考虑的股票")
-        log.info(context.unuse_PEG_stock_list[:2])
-        return context.unuse_PEG_stock_list
+        log.info(cycle_stock_list[:2])
+        return cycle_stock_list
 
     def fun_do_trade(self, context, trade_ratio, moneyfund):
 
