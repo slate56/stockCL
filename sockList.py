@@ -335,10 +335,7 @@ class PEG_lib():
         返回一个股票code  和  PEG的字典
         '''
 
-        if not context.__stock_df:
-            return
         log.info("现在计算股票的PEG")
-
         stock_list = context.__stock_df.keys()
 
         print("cal_stock_PEG fun:stocklist 长度：" + len(stock_list))
@@ -544,8 +541,8 @@ class QuantLib():
             unuse_stocks = get_industry_stocks(industry)
             cycle_stock_list.append(unuse_stocks)
 
-        print ("PEG 不考虑的股票")
-        log.info(cycle_stock_list[:2])
+        #print ("PEG 不考虑的周期类股票")
+        #log.info(cycle_stock_list[:1])
         return cycle_stock_list
 
     def fun_do_trade(self, context, trade_ratio, moneyfund):
