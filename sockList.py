@@ -101,22 +101,22 @@ def init_stock_list(context):
     del context.stock_df['end_date']
     del context.stock_df['type']
 
-    context.stock_df.insert(3, 'PEG', 0)
-
-    log.info(context.stock_df[:2])
+    #为了后面方便拼凑两个dataframe，添加一个code列
+    context.stock_df.insert(0, 'code', context.stock_df.index.tolist())
 
     stock_list = list(context.stock_df.index)
-
-    #在全部股票列表中，减去不需要计算的股票
-    #stock_list =  list(set(stock_list).difference(set(self.unuse_PEG_stock_list)))
 
     q = query(valuation
                 ).filter(valuation.code.in_(stock_list))
     #查询股票的财务数据，返回dataframe，结果中的缺失的数据使用0 填充
     df = get_fundamentals(q).fillna(value=0)
-    del df['id']
-    
-    log.info(df[:2])
+
+
+    #将股票的财务数据，股票名称拼成一个df
+    context.stock_df = pd.merge(context.stock_df,df, on=['code','code'])
+    context.stock_df.set_index('code')
+
+    #log.debug("添加股票财务数据的df\n %s" % (context.stock_df[:2]))
 
 
 def cal_PEG(context, lowPEG_ratio, portfolio_value):
@@ -137,9 +137,9 @@ def cal_PEG(context, lowPEG_ratio, portfolio_value):
     # 引用 QuantLib
     g.QuantLib = QuantLib()
 
-    log.info("获得不适用LowPEG算法的股票代码")
+    #log.debug("获得不适用LowPEG算法的股票代码")
     g.PEGLib.get_unuse_PEG_stock_list()
-    log.info("计算其他股票的PEG")
+    #log.debug("计算其他股票的PEG")
     g.PEGLib.fun_cal_stock_PEG(context)
 
 class PEG_lib():
@@ -169,8 +169,8 @@ class PEG_lib():
 
             stock_last_statDate = {}
             tmpDict = df.to_dict()
-            print("stock_last_statDate之后的df")
-            log.info(df)
+
+            #log.info("stock_last_statDate之后的df %s" % (df))
             for i in range(len(tmpDict['statDate'].keys())):
                 # 取得每个股票的代码，以及最新的财报发布日
                 stock_last_statDate[tmpDict['code'][i]] = tmpDict['statDate'][i]
@@ -305,27 +305,25 @@ class PEG_lib():
         返回一个股票code  和  PEG的字典
         '''
 
-        log.info("获取context中的股票 df")
-        stock_list = list(context.stock_df.index)
+        stock_list = context.stock_df['code'].tolist()
+        stock_dict = self.fun_get_inc(context, stock_list)
+        log.debug("stock_list:\n %s" % (stock_list[:2]))
+        #log.debug("stock_dict:\n %s" % (stock_dict))
 
         #在全部股票列表中，减去不需要计算的股票
-        stock_list =  list(set(stock_list).difference(set(self.unuse_PEG_stock_list)))
+        #stock_list =  list(set(stock_list).difference(set(self.unuse_PEG_stock_list)))
+        #log.debug("删除了不需要计算PEG的股票，stock_list:\n %s" % (stock_list[:2]))
 
         #获取所有股票的市盈率
-        q = query(valuation.code, valuation.pe_ratio
-                ).filter(valuation.code.in_(stock_list))
+        df = context.stock_df.loc[:,['code', 'pe_ratio']]
+        log.debug("股票的市盈率df:\n %s\n" % (df[:2]))
 
-        #查询股票的财务数据，返回dataframe，结果中的缺失的数据使用0 填充
-        df = get_fundamentals(q).fillna(value=0)
+        pe_dict = df.to_dict()
+        #log.debug("pe_dict\n%s\n" % (pe_dict))
 
-        tmpDict = df.to_dict()
-        pe_dict = {}
-        tmp_dict = {}
-        for i in range(len(tmpDict['code'].keys())):
-            pe_dict[tmpDict['code'][i]] = tmpDict['pe_ratio'][i]
 
-        log.info(pe_dict)
         df = g.QuantLib.fun_get_Divid_by_year(context, stock_list)
+        log.debug("fun_get_Divid_by_year df: %s\n" % (df[:5]))
         tmpDict = df.to_dict()
 
         stock_interest = {}
@@ -333,6 +331,7 @@ class PEG_lib():
             stock_interest[stock] = tmpDict['divpercent'][stock]
 
         h = history(1, '1d', 'close', stock_list, df=False)
+        #log.debug("stock_history: %s\n" % (h))
         PEG = {}
         for stock in stock_list:
             avg_inc  = stock_dict[stock]['avg_inc']
@@ -658,10 +657,16 @@ class QuantLib():
 
     def fun_get_Divid_by_year(self, context, stocks):
         year = context.current_dt.year - 1
+
+        log.debug("year : %s" % (year))
+
         #将当前股票池转换为国泰安的6位股票池
         stocks_symbol=[]
+        log.debug("stocks : %s" % (stocks[:5]))
         for s in stocks:
             stocks_symbol.append(s[0:6])
+
+        log.debug("stocks_symbol : %s" % (stocks_symbol[:5]))
 
         df = gta.run_query(query(
                 gta.STK_DIVIDEND.SYMBOL,                # 股票代码
