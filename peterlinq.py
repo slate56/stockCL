@@ -61,6 +61,7 @@ def fun_main(context):
     g.quantlib.fun_do_trade(context, lowPEG_trade_ratio, context.lowPEG_moneyfund)
 
 
+#低PEG的核心算法类
 def lowPEG_algo(context, lowPEG_ratio, portfolio_value):
     '''
     low PEG algorithms
@@ -126,6 +127,7 @@ class lowPEG_lib():
         '''
 
         # 定义股票池
+        log.info("init section:", context.lowPEG_stock_list)
         lowPEG_equity = context.lowPEG_stock_list
 
         lowPEG_moneyfund = ['511880.XSHG']
@@ -144,10 +146,8 @@ class lowPEG_lib():
 
     def fun_needRebalance(self, context):
         '''判定是否需要调仓
-
            当：股票池为空  或者 锁定周期结束时，重新调仓
         '''
-
 
         if len(context.lowPEG_stock_list) == 0:
             context.lowPEG_hold_periods = context.lowPEG_hold_cycle
@@ -418,13 +418,7 @@ class lowPEG_lib():
         #取得股票的总市值
         cap_dict = fun_get_stock_market_cap(stock_list)
 
-        #按照市值进行排序
-        print ("未排序 购买字典")
-        log.info(buydict)
-
         buydict = sorted(cap_dict.items(), key=lambda d:d[1], reverse=False)
-        print ("已排序 购买字典")
-        log.info(buydict)
 
         buylist = []
         i = 0
