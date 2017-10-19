@@ -54,29 +54,7 @@ def before_market_open(context):
 
 ## 开盘时运行函数， 缺省系统回调函数
 def market_open(context):
-    log.info('函数运行时间(market_open):'+str(context.current_dt.time()))
-    security = g.security
-    # 获取股票的收盘价
-    close_data = attribute_history(security, 5, '1d', ['close'])
-    # 取得过去五天的平均价格
-    MA5 = close_data['close'].mean()
-    # 取得上一时间点价格
-    current_price = close_data['close'][-1]
-    # 取得当前的现金
-    cash = context.portfolio.available_cash
-
-    # 如果上一时间点价格高出五天平均价1%, 则全仓买入
-    if current_price > 1.01*MA5:
-        # 记录这次买入
-        log.info("价格高于均价 1%%, 买入 %s" % (security))
-        # 用所有 cash 买入股票
-        order_value(security, cash)
-    # 如果上一时间点价格低于五天平均价, 则空仓卖出
-    elif current_price < MA5 and context.portfolio.positions[security].closeable_amount > 0:
-        # 记录这次卖出
-        log.info("价格低于均价, 卖出 %s" % (security))
-        # 卖出所有股票,使这只股票的最终持有量为0
-        order_target(security, 0)
+    log.info('market_open 执行')
 
 ## 收盘后运行函数, 缺省系统回调函数
 def after_market_close(context):
@@ -116,7 +94,7 @@ def init_stock_list(context):
     context.stock_df = pd.merge(context.stock_df,df, on=['code','code'])
     context.stock_df.set_index('code')
 
-    #log.debug("添加股票财务数据的df\n %s" % (context.stock_df[:2]))
+    log.debug("添加股票财务数据的df\n %s" % (context.stock_df[:2]))
 
 
 def cal_PEG(context, lowPEG_ratio, portfolio_value):
@@ -141,6 +119,7 @@ def cal_PEG(context, lowPEG_ratio, portfolio_value):
     g.PEGLib.get_unuse_PEG_stock_list()
     #log.debug("计算其他股票的PEG")
     g.PEGLib.fun_cal_stock_PEG(context)
+    log.debug("PEG：stock_list:\n %s" % (context.stock_df[:5]))
 
 class PEG_lib():
     #不适用lowPEG算法的股票代码列表
@@ -307,7 +286,7 @@ class PEG_lib():
 
         stock_list = context.stock_df['code'].tolist()
         stock_dict = self.fun_get_inc(context, stock_list)
-        log.debug("stock_list:\n %s" % (stock_list[:2]))
+        #log.debug("stock_list:\n %s" % (stock_list[:2]))
         #log.debug("stock_dict:\n %s" % (stock_dict))
 
         #在全部股票列表中，减去不需要计算的股票
@@ -316,14 +295,14 @@ class PEG_lib():
 
         #获取所有股票的市盈率
         df = context.stock_df.loc[:,['code', 'pe_ratio']]
-        log.debug("股票的市盈率df:\n %s\n" % (df[:2]))
+        #log.debug("股票的市盈率df:\n %s\n" % (df[:2]))
 
         pe_dict = df.to_dict()
         #log.debug("pe_dict\n%s\n" % (pe_dict))
 
 
         df = g.QuantLib.fun_get_Divid_by_year(context, stock_list)
-        log.debug("fun_get_Divid_by_year df: %s\n" % (df[:5]))
+        #log.debug("fun_get_Divid_by_year df: %s\n" % (df[:5]))
         tmpDict = df.to_dict()
 
         stock_interest = {}
@@ -658,7 +637,7 @@ class QuantLib():
     def fun_get_Divid_by_year(self, context, stocks):
         year = context.current_dt.year - 1
 
-        log.debug("year : %s" % (year))
+        #log.debug("year : %s" % (year))
 
         #将当前股票池转换为国泰安的6位股票池
         stocks_symbol=[]
