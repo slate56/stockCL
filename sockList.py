@@ -49,7 +49,7 @@ def before_market_open(context):
     context.lowPEG_ratio = 1.0
     init_stock_list(context)
     lowPEG_trade_ratio = cal_PEG(context, context.lowPEG_ratio, context.portfolio.portfolio_value)
-
+    log.debug("计算完PEG的df\n %s" % (context.stock_df[:2]))
 
 
 ## 开盘时运行函数， 缺省系统回调函数
@@ -128,7 +128,13 @@ class PEG_lib():
         pass
 
     def fun_get_inc(self, context, stock_list):
-        '''取得净利润增长率参数'''
+        '''
+            取得净利润增长率参数
+            返回一个字典的字典： sock_dict，每个股票一个字典
+                sick_dict[stock_code]['avg_inc']：过去4个季度平均增长率
+                sick_dict[stock_code]['last_inc']：最后一个季度的增占率
+                sick_dict[stock_code]['inc_std']：增长标准差
+        '''
 
         # 取最近的四个季度财报的日期
         def __get_quarter(stock_list):
@@ -284,57 +290,65 @@ class PEG_lib():
         返回一个股票code  和  PEG的字典
         '''
 
-        stock_list = context.stock_df['code'].tolist()
-        stock_dict = self.fun_get_inc(context, stock_list)
-        #log.debug("stock_list:\n %s" % (stock_list[:2]))
-        #log.debug("stock_dict:\n %s" % (stock_dict))
+        stock_code_list = context.stock_df['code'].tolist()
+
+        #根据股票代码，计算股票的净利润增占率，返回一次增长率字典
+        #
+        stock_dict = self.fun_get_inc(context, stock_code_list)
+        log.debug("股票增长率字典:\n %s" % (stock_dict['000001.XSHE']))
 
         #在全部股票列表中，减去不需要计算的股票
-        #stock_list =  list(set(stock_list).difference(set(self.unuse_PEG_stock_list)))
-        #log.debug("删除了不需要计算PEG的股票，stock_list:\n %s" % (stock_list[:2]))
+        #stock_code_list =  list(set(stock_code_list).difference(set(self.unuse_PEG_stock_list)))
+        #log.debug("删除了不需要计算PEG的股票，stock_code_list:\n %s" % (stock_code_list[:2]))
 
         #获取所有股票的市盈率
-        df = context.stock_df.loc[:,['code', 'pe_ratio']]
-        #log.debug("股票的市盈率df:\n %s\n" % (df[:2]))
+        pe_df = context.stock_df.loc[:,['code', 'pe_ratio']]
+        log.debug("股票的市盈率df:\n %s\n" % (pe_df[:2]))
 
-        pe_dict = df.to_dict()
+        pe_dict = pe_df.to_dict()
         #log.debug("pe_dict\n%s\n" % (pe_dict))
 
-
-        df = g.QuantLib.fun_get_Divid_by_year(context, stock_list)
+        #获取股票分红信息
+        fh_df = g.QuantLib.fun_get_Divid_by_year(context, stock_code_list)
         #log.debug("fun_get_Divid_by_year df: %s\n" % (df[:5]))
-        tmpDict = df.to_dict()
+        fh_Dict = fh_df.to_dict()
 
         stock_interest = {}
-        for stock in tmpDict['divpercent']:
-            stock_interest[stock] = tmpDict['divpercent'][stock]
+        for stock in fh_Dict['divpercent']:
+            stock_interest[stock] = fh_Dict['divpercent'][stock]
 
-        h = history(1, '1d', 'close', stock_list, df=False)
+        h = history(1, '1d', 'close', stock_code_list, df=False)
         #log.debug("stock_history: %s\n" % (h))
         PEG = {}
-        for stock in stock_list:
-            avg_inc  = stock_dict[stock]['avg_inc']
-            last_inc = stock_dict[stock]['last_inc']
-            inc_std  = stock_dict[stock]['inc_std']
+        for stock_code in stock_code_list:
+            avg_inc  = stock_dict[stock_code]['avg_inc']
+            last_inc = stock_dict[stock_code]['last_inc']
+            inc_std  = stock_dict[stock_code]['inc_std']
 
             pe = -1
-            if stock in pe_dict:
-                pe = pe_dict[stock]
+            if stock_code in pe_dict:
+                pe = pe_dict[stock_code]
 
             interest = 0
-            if stock in stock_interest:
-                interest = stock_interest[stock]
+            if stock_code in stock_interest:
+                interest = stock_interest[stock_code]
 
-            PEG[stock] = -1
+            PEG[stock_code] = -1
             '''
             原话大概是：
             1、增长率 > 50 的公司要小心，高增长不可持续，一旦转差就要卖掉；实现的时候，直接卖掉增长率 > 50 个股票
             2、增长平稳，不知道该怎么表达，用了 inc_std < last_inc。有思路的同学请告诉我
             '''
             if pe > 0 and last_inc <= 50 and last_inc > 0 and inc_std < last_inc:
-                PEG[stock] = (pe / (last_inc + interest*100))
+                PEG[stock_code] = (pe / (last_inc + interest*100))
 
-        return PEG
+        #context.stock_df.join(pd.DataFrame(PEG.values, index=PEG.keys, columns=['PEG',]))
+        PEG_df = pd.DataFrame(PEG)
+        log.debug(PEG_df)
+
+        log.debug("添加PEG的df:\n %s\n" % (context.stock_df[:2]))
+        log.debug("PEG字典:\n %s\n" % (PFG['000001.XSHG']))
+
 
     def get_unuse_PEG_stock_list(self):
         '''获取不去要计算PEG的股票代码列表
@@ -635,6 +649,11 @@ class QuantLib():
         return equity_value
 
     def fun_get_Divid_by_year(self, context, stocks):
+        '''
+            stocks  股票代码列表
+            逐年获取股票的分红信息
+        '''
+
         year = context.current_dt.year - 1
 
         #log.debug("year : %s" % (year))
