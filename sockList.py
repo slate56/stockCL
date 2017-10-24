@@ -49,7 +49,7 @@ def before_market_open(context):
     context.lowPEG_ratio = 1.0
     init_stock_list(context)
     lowPEG_trade_ratio = cal_PEG(context, context.lowPEG_ratio, context.portfolio.portfolio_value)
-    log.debug("计算完PEG的df\n %s" % (context.stock_df[:2]))
+    #log.debug("计算完PEG的df\n %s" % (context.stock_df[:2]))
 
 
 ## 开盘时运行函数， 缺省系统回调函数
@@ -91,10 +91,10 @@ def init_stock_list(context):
 
 
     #将股票的财务数据，股票名称拼成一个df
-    context.stock_df = pd.merge(context.stock_df,df, on=['code','code'])
+    context.stock_df = pd.merge(context.stock_df, df, on=['code','code'])
     context.stock_df.set_index('code')
 
-    log.debug("添加股票财务数据的df\n %s" % (context.stock_df[:2]))
+    #log.debug("添加股票财务数据的df\n %s" % (context.stock_df[:2]))
 
 
 def cal_PEG(context, lowPEG_ratio, portfolio_value):
@@ -119,7 +119,7 @@ def cal_PEG(context, lowPEG_ratio, portfolio_value):
     g.PEGLib.get_unuse_PEG_stock_list()
     #log.debug("计算其他股票的PEG")
     g.PEGLib.fun_cal_stock_PEG(context)
-    log.debug("PEG：stock_list:\n %s" % (context.stock_df[:5]))
+    #log.debug("PEG：stock_list:\n %s" % (context.stock_df[:5]))
 
 class PEG_lib():
     #不适用lowPEG算法的股票代码列表
@@ -295,7 +295,7 @@ class PEG_lib():
         #根据股票代码，计算股票的净利润增占率，返回一次增长率字典
         #
         stock_dict = self.fun_get_inc(context, stock_code_list)
-        log.debug("股票增长率字典:\n %s" % (stock_dict['000001.XSHE']))
+        #log.debug("股票增长率字典:\n %s" % (stock_dict['000001.XSHE']))
 
         #在全部股票列表中，减去不需要计算的股票
         #stock_code_list =  list(set(stock_code_list).difference(set(self.unuse_PEG_stock_list)))
@@ -303,7 +303,7 @@ class PEG_lib():
 
         #获取所有股票的市盈率
         pe_df = context.stock_df.loc[:,['code', 'pe_ratio']]
-        log.debug("股票的市盈率df:\n %s\n" % (pe_df[:2]))
+        #log.debug("股票的市盈率df:\n %s\n" % (pe_df[:2]))
 
         pe_dict = pe_df.to_dict()
         #log.debug("pe_dict\n%s\n" % (pe_dict))
@@ -342,12 +342,23 @@ class PEG_lib():
             if pe > 0 and last_inc <= 50 and last_inc > 0 and inc_std < last_inc:
                 PEG[stock_code] = (pe / (last_inc + interest*100))
 
-        #context.stock_df.join(pd.DataFrame(PEG.values, index=PEG.keys, columns=['PEG',]))
-        PEG_df = pd.DataFrame(PEG)
-        log.debug(PEG_df)
+        peg_df = pd.DataFrame.from_dict(PEG, 'index')
 
-        log.debug("添加PEG的df:\n %s\n" % (context.stock_df[:2]))
-        log.debug("PEG字典:\n %s\n" % (PFG['000001.XSHG']))
+        #把index当做索引插入一列，方便合并
+        peg_df.insert(0, 'code', peg_df.index.tolist())
+        #修改列名， 设置索引列
+        peg_df.columns=['code', 'PEG']
+        peg_df.set_index('code')
+        #合并
+
+        log.debug("peg_df:\n %s\n" % (peg_df[:2]))
+        #log.debug("未添加PEG的df:\n %s\n" % (context.stock_df[:2]))
+
+        #合并计算的PEG
+        context.stock_df = pd.merge(context.stock_df, peg_df, on=['code', 'code'])
+
+        #log.debug("添加PEG的df:\n %s\n" % (context.stock_df[:2]))
+        #log.debug("PEG字典:\n %s\n" % (PEG['000002.XSHE']))
 
 
     def get_unuse_PEG_stock_list(self):
@@ -659,12 +670,13 @@ class QuantLib():
         #log.debug("year : %s" % (year))
 
         #将当前股票池转换为国泰安的6位股票池
+        #主要是将000001.XSHE  转换成 000001
         stocks_symbol=[]
-        log.debug("stocks : %s" % (stocks[:5]))
+        #log.debug("转换前股票代码 : %s" % (stocks[:5]))
         for s in stocks:
             stocks_symbol.append(s[0:6])
 
-        log.debug("stocks_symbol : %s" % (stocks_symbol[:5]))
+        #log.debug("转换后股票代码 : %s" % (stocks_symbol[:5]))
 
         df = gta.run_query(query(
                 gta.STK_DIVIDEND.SYMBOL,                # 股票代码
