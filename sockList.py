@@ -119,8 +119,11 @@ def cal_PEG(context, lowPEG_ratio, portfolio_value):
     g.PEGLib.get_unuse_PEG_stock_list()
     #log.debug("计算其他股票的PEG")
     g.PEGLib.fun_cal_stock_PEG(context)
+<<<<<<< HEAD
     #按照 PEG的值，降序排列
     #context.stock_df= context.stock_df.sort(["PEG"], ascending=False)
+=======
+>>>>>>> 0c502c0c2f17ecdeafcbc5d55cd0b04554f5a70a
     #log.debug("PEG：stock_list:\n %s" % (context.stock_df[:5]))
 
 class PEG_lib():
@@ -345,6 +348,7 @@ class PEG_lib():
                 PEG[stock_code] = (pe / (last_inc + interest*100))
 
         peg_df = pd.DataFrame.from_dict(PEG, 'index')
+<<<<<<< HEAD
         log.debug("peg_df:\n %s\n" % (peg_df.loc[lc["PEG"] > 0].head()))
 
 
@@ -360,6 +364,24 @@ class PEG_lib():
         log.debug("添加PEG的df:\n %s\n" % (context.stock_df.loc[lc["PEG"] > 0].head()))
         ######################################################################
 
+=======
+
+        #把index当做索引插入一列，方便合并
+        peg_df.insert(0, 'code', peg_df.index.tolist())
+        #修改列名， 设置索引列
+        peg_df.columns=['code', 'PEG']
+        peg_df.set_index('code')
+        #合并
+
+        log.debug("peg_df:\n %s\n" % (peg_df[:2]))
+        #log.debug("未添加PEG的df:\n %s\n" % (context.stock_df[:2]))
+
+        #合并计算的PEG
+        context.stock_df = pd.merge(context.stock_df, peg_df, on=['code', 'code'])
+
+        #log.debug("添加PEG的df:\n %s\n" % (context.stock_df[:2]))
+        #log.debug("PEG字典:\n %s\n" % (PEG['000002.XSHE']))
+>>>>>>> 0c502c0c2f17ecdeafcbc5d55cd0b04554f5a70a
 
 
     def get_unuse_PEG_stock_list(self):
