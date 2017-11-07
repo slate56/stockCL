@@ -1,3 +1,23 @@
+# 克隆自聚宽文章：https://www.joinquant.com/post/3347
+# 标题：彼得林奇修正 PEG
+# 作者：小兵哥
+'''
+参考帖子：
+量化课堂：彼得林奇的成功投资
+
+与量化课堂的策略相比，有几点改动：
+1、引入修正 PEG，把分红加入到了计算 PEG 的过程中去；
+2、剔除了周期性行业、项目类公司；
+3、参考彼得林奇的原文，剔除掉增长 >50 的股票（原文是要密切关注，因为高增长不可持续，实现里是直接剔除）
+4、修改了配仓策略，从等权重变更为风险平价
+5、日波动约束在 3% 以内；
+6、最大持仓 5 个股票，30个交易日调仓一次，无择时，无止损
+7、PEG < 0.5，进入待选股；按照市值排序，优先买入市值低的（彼得林奇原文也是市值小的优先）
+8、卖条件，如果选进的股票>5 个，则清光持仓；如果 <5 个，则从持仓里挑 PEG最低的保留（凑够5个），直到 PEG >1.0 才清掉。
+
+收益看起来还挺好的，欢迎大家帮忙抓虫。谢谢。
+'''
+
 import numpy as np
 import talib
 import pandas
@@ -8,136 +28,116 @@ from scipy import linalg as sla
 from scipy import spatial
 from jqdata import gta
 
-
-#初始化方法，在整个回测、模拟实盘中最开始执行一次
-#用于初始一些全局变量
 def initialize(context):
     #用沪深 300 做回报基准
     set_benchmark('000300.XSHG')
-
     set_slippage(FixedSlippage(0.002))
-    # 开启动态复权模式(真实价格)
     set_option('use_real_price', True)
 
-    # 过滤掉order系列API产生的比error级别低的log
-    #log.set_level('order', 'error')
-
-    ### 股票相关设定 ###
-    # 股票类每笔交易时的手续费是：买入时佣金万分之三，卖出时佣金万分之三加千分之一印花税, 每笔交易佣金最低扣5块钱
-    set_order_cost(OrderCost(close_tax=0.001, open_commission=0.0003, close_commission=0.0003, min_commission=5), type='stock')
-
-    ## 运行函数（reference_security为运行时间的参考标的；传入的标的只做种类区分，因此传入'000300.XSHG'或'510300.XSHG'是一样的）
-      # 开盘前运行
-    run_daily(before_market_open, time='before_open', reference_security='000300.XSHG')
-      # 开盘时运行
-    run_daily(market_open, time='open', reference_security='000300.XSHG')
-      # 收盘后运行
-    run_daily(after_market_close, time='after_close', reference_security='000300.XSHG')
-
-    context.lowPEG_position_price = {}
-    context.QuantLib = QuantLib()
-
-    #run_daily(fun_main, '10:30')
-
-
-
-## 开盘前运行函数， 缺省系统回调函数
-def before_market_open(context):
-    # 输出运行时间
-    log.info('函数运行时间(before_market_open)：'+str(context.current_dt.time()))
-
+    # 关闭部分log
+    log.set_level('order', 'error')
+    # 定义策略占用仓位比例
     context.lowPEG_ratio = 1.0
-    init_stock_list(context)
-    lowPEG_trade_ratio = cal_PEG(context, context.lowPEG_ratio, context.portfolio.portfolio_value)
-    #log.debug("计算完PEG的df\n %s" % (context.stock_df[:2]))
 
-
-## 开盘时运行函数， 缺省系统回调函数
-def market_open(context):
-    log.info('market_open 执行')
-
-## 收盘后运行函数, 缺省系统回调函数
-def after_market_close(context):
-    log.info(str('函数运行时间(after_market_close):'+str(context.current_dt.time())))
-    #得到当天所有成交记录
-    trades = get_trades()
-    for _trade in trades.values():
-        log.info('成交记录：'+str(_trade))
-    log.info('一天结束')
-    log.info('##############################################################')
-
-##准备股票列表
-def init_stock_list(context):
-
-    today = context.current_dt
-    # 股票池,初始化函数时是空
-    # 返回dataframe 格式：
-    #                   display_name	name	  start_date
-    #  000001.XSHE	    平安银行	    PAYH	   1991-04-03
-    #  000002.XSHE	    万 科Ａ	    WKA	        1991-01-29
-    context.stock_df = get_all_securities(['stock'], today)
-    del context.stock_df['end_date']
-    del context.stock_df['type']
-
-    #为了后面方便拼凑两个dataframe，添加一个code列
-    context.stock_df.insert(0, 'code', context.stock_df.index.tolist())
-
-    stock_list = list(context.stock_df.index)
-
-    q = query(valuation
-                ).filter(valuation.code.in_(stock_list))
-    #查询股票的财务数据，返回dataframe，结果中的缺失的数据使用0 填充
-    df = get_fundamentals(q).fillna(value=0)
-
-
-    #将股票的财务数据，股票名称拼成一个df
-    context.stock_df = pd.merge(context.stock_df, df, on=['code','code'])
-    context.stock_df.set_index('code')
-
-    #log.debug("添加股票财务数据的df\n %s" % (context.stock_df[:2]))
-
-
-def cal_PEG(context, lowPEG_ratio, portfolio_value):
-    '''
-    计算所有股票的PEG
-    输入参数：lowPEG_ratio, protfolio_value
-    输出参数：lowPEG_trade_ratio
-    自有类  : PEG_lib
-    调用类  : QuantLib
-    '''
     # for lowPEG algorithms
     # 正态分布概率表，标准差倍数以及置信率
     # 1.96, 95%; 2.06, 96%; 2.18, 97%; 2.34, 98%; 2.58, 99%; 5, 99.9999%
     context.lowPEG_confidencelevel = 1.96
-    context.lowPEG_hold_periods = 0
-    # 引用 lib，lowPEG类
-    g.PEGLib = PEG_lib()
-    # 引用 QuantLib
-    g.QuantLib = QuantLib()
+    context.lowPEG_hold_periods, context.lowPEG_hold_cycle = 0, 30
+    context.lowPEG_stock_list = []
+    context.lowPEG_position_price = {}
 
-    #log.debug("获得不适用LowPEG算法的股票代码")
-    g.PEGLib.get_unuse_PEG_stock_list()
-    #log.debug("计算其他股票的PEG")
-    g.PEGLib.fun_cal_stock_PEG(context)
-    #按照 PEG的值，降序排列
-    #context.stock_df= context.stock_df.sort(["PEG"], ascending=False)
-    #log.debug("PEG：stock_list:\n %s" % (context.stock_df[:5]))
+    g.quantlib = quantlib()
 
-class PEG_lib():
-    #不适用lowPEG算法的股票代码列表
-    unuse_PEG_stock_list = []
+    run_daily(fun_main, '10:30')
+
+def fun_main(context):
+
+    lowPEG_trade_ratio = lowPEG_algo(context, context.lowPEG_ratio, context.portfolio.portfolio_value)
+    # 调仓，执行交易
+    g.quantlib.fun_do_trade(context, lowPEG_trade_ratio, context.lowPEG_moneyfund)
+
+
+def lowPEG_algo(context, lowPEG_ratio, portfolio_value):
+    '''
+    low PEG algorithms
+    输入参数：lowPEG_ratio, protfolio_value
+    输出参数：lowPEG_trade_ratio
+    自有类  : lowPEG_lib
+    调用类  : quantlib
+    '''
+
+    # 引用 lib
+    g.lowPEG = lowPEG_lib()
+    # 引用 quantlib
+    g.quantlib = quantlib()
+
+    g.lowPEG.fun_initialize(context)
+
+    recal_flag = False
+    if g.lowPEG.fun_needRebalance(context):
+        recal_flag = True
+
+    # 配仓，分配持股比例
+    equity_ratio = {}
+    if recal_flag:
+        context.lowPEG_stock_list = g.lowPEG.fun_get_stock_list(context)
+        equity_ratio, bonds_ratio = g.lowPEG.fun_assetAllocationSystem(context, context.lowPEG_stock_list)
+    else:
+        equity_ratio = context.lowPEG_equity_ratio
+        bonds_ratio = context.lowPEG_bonds_ratio
+
+    context.lowPEG_equity_ratio = equity_ratio
+    context.lowPEG_bonds_ratio = bonds_ratio
+
+    # 分配头寸，配置市值
+    trade_ratio = {}
+    if recal_flag:
+        trade_ratio = g.lowPEG.fun_calPosition(context, equity_ratio, bonds_ratio, lowPEG_ratio, portfolio_value)
+
+        stock_list = list(get_all_securities(['stock']).index)
+        for stock in context.portfolio.positions.keys():
+            if stock not in trade_ratio and stock in stock_list:
+                trade_ratio[stock] = 0
+    else:
+        trade_ratio = context.lowPEG_trade_ratio
+
+    context.lowPEG_trade_ratio = trade_ratio
+
+    return trade_ratio
+
+class lowPEG_lib():
+
     def __init__(self, _period = '1d'):
         pass
 
-    def fun_get_inc(self, context, stock_list):
-        '''
-            取得净利润增长率参数
-            返回一个字典的字典： sock_dict，每个股票一个字典
-                sick_dict[stock_code]['avg_inc']：过去4个季度平均增长率
-                sick_dict[stock_code]['last_inc']：最后一个季度的增占率
-                sick_dict[stock_code]['inc_std']：增长标准差
-        '''
+    def fun_initialize(self, context):
+        # 定义股票池
+        lowPEG_equity = context.lowPEG_stock_list
 
+        lowPEG_moneyfund = ['511880.XSHG']
+
+        # 上市不足 60 天的剔除掉
+        context.lowPEG_equity    = g.quantlib.fun_delNewShare(context, lowPEG_equity, 60)
+        context.lowPEG_moneyfund = g.quantlib.fun_delNewShare(context, lowPEG_moneyfund, 60)
+
+        context.lowPEG_hold_num = 5
+        context.lowPEG_risk_ratio = 0.03 / context.lowPEG_hold_num
+
+    def fun_needRebalance(self, context):
+        if len(context.lowPEG_stock_list) == 0:
+            context.lowPEG_hold_periods = context.lowPEG_hold_cycle
+            return True
+
+        if context.lowPEG_hold_periods == 0:
+            context.lowPEG_hold_periods = context.lowPEG_hold_cycle
+            return True
+        else:
+            context.lowPEG_hold_periods -= 1
+            return False
+
+    # 取得净利润增长率参数
+    def fun_get_inc(self, context, stock_list):
         # 取最近的四个季度财报的日期
         def __get_quarter(stock_list):
             '''
@@ -150,14 +150,8 @@ class PEG_lib():
                      ).filter(indicator.code.in_(stock_list))
             df = get_fundamentals(q)
 
-            if len(stock_list) <= 0:
-                log.error("stock list 长度为0")
-
-
             stock_last_statDate = {}
             tmpDict = df.to_dict()
-
-            #log.info("stock_last_statDate之后的df %s" % (df))
             for i in range(len(tmpDict['statDate'].keys())):
                 # 取得每个股票的代码，以及最新的财报发布日
                 stock_last_statDate[tmpDict['code'][i]] = tmpDict['statDate'][i]
@@ -287,100 +281,128 @@ class PEG_lib():
 
         return stock_dict
 
-    def fun_cal_stock_PEG(self, context):
-        '''计算股票的PEG
-        返回一个股票code  和  PEG的字典
-        '''
+    def fun_cal_stock_PEG(self, context, stock_list, stock_dict):
+        if not stock_list:
+            PEG = {}
+            return PEG
 
-        stock_code_list = context.stock_df['code'].tolist()
+        q = query(valuation.code, valuation.pe_ratio
+                ).filter(valuation.code.in_(stock_list))
 
-        #根据股票代码，计算股票的净利润增占率，返回一次增长率字典
-        #
-        stock_dict = self.fun_get_inc(context, stock_code_list)
-        #log.debug("股票增长率字典:\n %s" % (stock_dict['000001.XSHE']))
+        df = get_fundamentals(q).fillna(value=0)
 
-        #在全部股票列表中，减去不需要计算的股票
-        #stock_code_list =  list(set(stock_code_list).difference(set(self.unuse_PEG_stock_list)))
-        #log.debug("删除了不需要计算PEG的股票，stock_code_list:\n %s" % (stock_code_list[:2]))
+        tmpDict = df.to_dict()
+        pe_dict = {}
+        tmp_dict = {}
+        for i in range(len(tmpDict['code'].keys())):
+            pe_dict[tmpDict['code'][i]] = tmpDict['pe_ratio'][i]
 
-        #获取所有股票的市盈率
-        pe_df = context.stock_df.loc[:,['code', 'pe_ratio']]
-        #log.debug("股票的市盈率df:\n %s\n" % (pe_df[:2]))
-
-        pe_dict = pe_df.to_dict()
-        #log.debug("pe_dict\n%s\n" % (pe_dict))
-
-        #获取股票分红信息
-        fh_df = g.QuantLib.fun_get_Divid_by_year(context, stock_code_list)
-        #log.debug("fun_get_Divid_by_year df: %s\n" % (df[:5]))
-        fh_Dict = fh_df.to_dict()
+        df = g.quantlib.fun_get_Divid_by_year(context, stock_list)
+        tmpDict = df.to_dict()
 
         stock_interest = {}
-        for stock in fh_Dict['divpercent']:
-            stock_interest[stock] = fh_Dict['divpercent'][stock]
+        for stock in tmpDict['divpercent']:
+            stock_interest[stock] = tmpDict['divpercent'][stock]
 
-        h = history(1, '1d', 'close', stock_code_list, df=False)
-        #log.debug("stock_history: %s\n" % (h))
+        h = history(1, '1d', 'close', stock_list, df=False)
         PEG = {}
-        for stock_code in stock_code_list:
-            avg_inc  = stock_dict[stock_code]['avg_inc']
-            last_inc = stock_dict[stock_code]['last_inc']
-            inc_std  = stock_dict[stock_code]['inc_std']
+        for stock in stock_list:
+            avg_inc  = stock_dict[stock]['avg_inc']
+            last_inc = stock_dict[stock]['last_inc']
+            inc_std  = stock_dict[stock]['inc_std']
 
             pe = -1
-            if stock_code in pe_dict:
-                pe = pe_dict[stock_code]
+            if stock in pe_dict:
+                pe = pe_dict[stock]
 
             interest = 0
-            if stock_code in stock_interest:
-                interest = stock_interest[stock_code]
+            if stock in stock_interest:
+                interest = stock_interest[stock]
 
-            PEG[stock_code] = -1
+            PEG[stock] = -1
             '''
             原话大概是：
             1、增长率 > 50 的公司要小心，高增长不可持续，一旦转差就要卖掉；实现的时候，直接卖掉增长率 > 50 个股票
             2、增长平稳，不知道该怎么表达，用了 inc_std < last_inc。有思路的同学请告诉我
             '''
             if pe > 0 and last_inc <= 50 and last_inc > 0 and inc_std < last_inc:
-                PEG[stock_code] = (pe / (last_inc + interest*100))
+                PEG[stock] = (pe / (last_inc + interest*100))
 
-        peg_df = pd.DataFrame.from_dict(PEG, 'index')
-        log.debug("peg_df:\n %s\n" % (peg_df.loc[lc["PEG"] > 0].head()))
+        return PEG
 
+    def fun_get_stock_list(self, context):
 
-        #####################################################################
-        #合并操作
-        #把index当做索引插入一列，方便合并
-        peg_df.insert(0, 'code', peg_df.index.tolist())
-        #修改列名， 设置索引列
-        peg_df.columns=['code', 'PEG']
-        peg_df.set_index('code')
-        #合并计算的PEG
-        context.stock_df = pd.merge(context.stock_df, peg_df, on=['code', 'code'])
-        log.debug("添加PEG的df:\n %s\n" % (context.stock_df.loc[lc["PEG"] > 0].head()))
-        ######################################################################
+        def fun_get_stock_market_cap(stock_list):
+            q = query(valuation.code, valuation.market_cap
+                    ).filter(valuation.code.in_(stock_list))
 
+            df = get_fundamentals(q).fillna(value=0)
+            tmpDict = df.to_dict()
+            stock_dict = {}
+            for i in range(len(tmpDict['code'].keys())):
+                # 取得每个股票的 market_cap
+                stock_dict[tmpDict['code'][i]] = tmpDict['market_cap'][i]
 
+            return stock_dict
 
-    def get_unuse_PEG_stock_list(self):
-        '''获取不去要计算PEG的股票代码列表
-            主要是上市不足60天的股票
-        '''
+        today = context.current_dt
+        stock_list = list(get_all_securities(['stock'], today).index)
 
-        #剔除已经停盘的股票
-        #stock_list = g.QuantLib.unpaused(stock_list)
-        #获取周期性行业，这类股票不太适合PEG选股
-        self.unuse_PEG_stock_list = g.QuantLib.fun_get_cycle_industry()
-        log.info(self.unuse_PEG_stock_list[:2])
+        stock_list = g.quantlib.unpaused(stock_list)
+        stock_list = g.quantlib.fun_remove_cycle_industry(stock_list)
 
+        stock_dict = self.fun_get_inc(context, stock_list)
+        old_stocks_list = []
+        for stock in context.portfolio.positions.keys():
+            if stock in stock_list:
+                old_stocks_list.append(stock)
+
+        stock_PEG = self.fun_cal_stock_PEG(context, stock_list, stock_dict)
+
+        stock_list = []
+        buydict = {}
+
+        for stock in stock_PEG.keys():
+            if stock_PEG[stock] < 0.5 and stock_PEG[stock] > 0:
+                stock_list.append(stock)
+                buydict[stock] = stock_PEG[stock]
+        cap_dict = fun_get_stock_market_cap(stock_list)
+        buydict = sorted(cap_dict.items(), key=lambda d:d[1], reverse=False)
+
+        buylist = []
+        i = 0
+        for idx in buydict:
+            if i < context.lowPEG_hold_num:
+                stock = idx[0]
+                buylist.append(stock) # 候选 stocks
+                print stock + ", PEG = "+ str(stock_PEG[stock])
+                i += 1
+
+        if len(buylist) < context.lowPEG_hold_num:
+            old_stocks_PEG = self.fun_cal_stock_PEG(context, old_stocks_list, stock_dict)
+            tmpDict = {}
+            tmpList = []
+            for stock in old_stocks_PEG.keys():
+                if old_stocks_PEG[stock] < 1.0 and old_stocks_PEG[stock] > 0:
+                    tmpDict[stock] = old_stocks_PEG[stock]
+            tmpDict = sorted(tmpDict.items(), key=lambda d:d[1], reverse=False)
+            i = len(buylist)
+            for idx in tmpDict:
+                if i < context.lowPEG_hold_num and idx[0] not in buylist:
+                    buylist.append(idx[0])
+                    i += 1
+
+        print str(len(stock_list)) + " / " + str(len(buylist))
+        print buylist
+
+        return buylist
 
     def fun_assetAllocationSystem(self, context, buylist):
-
         def __fun_getEquity_ratio(context, __stocklist):
             __ratio = {}
             # 按风险平价配仓
             if __stocklist:
-                __ratio = g.QuantLib.fun_calStockWeight_by_risk(context, 2.58, __stocklist)
+                __ratio = g.quantlib.fun_calStockWeight_by_risk(context, 2.58, __stocklist)
 
             return __ratio
 
@@ -397,7 +419,7 @@ class PEG_lib():
 
         equity_value = 0
         if equity_ratio:
-            equity_value = g.QuantLib.fun_getEquity_value(equity_ratio, risk_money, maxrisk_money, context.lowPEG_confidencelevel)
+            equity_value = g.quantlib.fun_getEquity_value(equity_ratio, risk_money, maxrisk_money, context.lowPEG_confidencelevel)
 
         value_ratio = 0
         total_value = portfolio_value * lowPEG_ratio
@@ -424,18 +446,13 @@ class PEG_lib():
 
         return trade_ratio
 
-class QuantLib():
-    '''大概是一个工具类'''
+class quantlib():
 
     def __init__(self, _period = '1d'):
         pass
 
-
-    def fun_get_cycle_industry(self):
-        '''获得周期性行业'''
-
-        cycle_stock_list = []
-        #周期性行业定义
+    # 剔除周期性行业
+    def fun_remove_cycle_industry(self, stock_list):
         cycle_industry = [#'A01', #	农业 	1993-09-17
                           #'A02', # 林业 	1996-12-06
                           #'A03', #	畜牧业 	1997-06-11
@@ -514,14 +531,10 @@ class QuantLib():
                           ]
 
         for industry in cycle_industry:
-            #获取在给定日期一个行业的所有股票，  industry 是 行业代码
-            unuse_stocks = get_industry_stocks(industry)
-            #两个list的并集
-            cycle_stock_list = list(set(cycle_stock_list).union(set(unuse_stocks)))
+            stocks = get_industry_stocks(industry)
+            stock_list = list(set(stock_list).difference(set(stocks)))
 
-        #print ("PEG 不考虑的周期类股票")
-        #log.info(cycle_stock_list[:1])
-        return cycle_stock_list
+        return stock_list
 
     def fun_do_trade(self, context, trade_ratio, moneyfund):
 
@@ -661,23 +674,11 @@ class QuantLib():
         return equity_value
 
     def fun_get_Divid_by_year(self, context, stocks):
-        '''
-            stocks  股票代码列表
-            逐年获取股票的分红信息
-        '''
-
         year = context.current_dt.year - 1
-
-        #log.debug("year : %s" % (year))
-
         #将当前股票池转换为国泰安的6位股票池
-        #主要是将000001.XSHE  转换成 000001
         stocks_symbol=[]
-        #log.debug("转换前股票代码 : %s" % (stocks[:5]))
         for s in stocks:
             stocks_symbol.append(s[0:6])
-
-        #log.debug("转换后股票代码 : %s" % (stocks_symbol[:5]))
 
         df = gta.run_query(query(
                 gta.STK_DIVIDEND.SYMBOL,                # 股票代码
@@ -776,26 +777,8 @@ class QuantLib():
 
     def fun_calStockWeight_by_risk(self, context, confidencelevel, stocklist):
 
-        '''根据风险，计算股票权重
-        :param context: 上下文
-        :param confidencelevel: 置信率
-        :param stocklist: 股票列表
-        :return:
-        '''
         def __fun_calstock_risk_ES(stock, lag, confidencelevel):
-
-            """
-            根据计算股票的风险ES
-            :param stock: 股票代码
-            :param lag: 180， 所查看历史数据的周期，就是history中历史数据的记录数，如果后面是1d，那么就是向前追溯180d
-            :param confidencelevel: 置信率
-            :return: 返回股票的风险ES
-            """
-
-            #取得股票的历史数据，缺省关注收盘价，参数lag缺省180d
             hStocks = history(lag, '1d', 'close', stock, df=True)
-
-            #下面的一段代码不知道什么意思？？？？？
             dailyReturns = hStocks.resample('D',how='last').pct_change().fillna(value=0, method=None, axis=0).values
             if confidencelevel   == 1.96:
                 a = (1 - 0.95)
@@ -879,13 +862,8 @@ class QuantLib():
                     Value -= curPrice*100
                 self.fun_trade(context, stock, Value)
 
-
+    # 剔除上市时间较短的产品
     def fun_delNewShare(self, context, equity, deltaday):
-        '''
-        剔除上市时间较短的产品
-        从 equity 中删除上市时间少于 deltaday天的产品
-        返回符合要求的产品list
-        '''
         deltaDate = context.current_dt.date() - dt.timedelta(deltaday)
 
         tmpList = []
@@ -896,7 +874,6 @@ class QuantLib():
         return tmpList
 
     def unpaused(self, _stocklist):
-        '''删除当天已经停盘的股票'''
         current_data = get_current_data()
         return [s for s in _stocklist if not current_data[s].paused]
 
