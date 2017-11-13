@@ -92,7 +92,6 @@ class trade_stat():
     def statis_total_profit(self, context):
         return context.portfolio.portfolio_value - context.portfolio.starting_cash
 
-
 def get_blacklist():
     # 黑名单一览表，更新时间 2016.7.10 by 沙米
     # 科恒股份、太空板业，一旦2016年继续亏损，直接面临暂停上市风险
